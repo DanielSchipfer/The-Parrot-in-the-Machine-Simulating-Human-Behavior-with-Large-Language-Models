@@ -8,8 +8,24 @@ import pandas as pd
 from dotenv import load_dotenv
 from tqdm import tqdm
 from openai import OpenAI
-from typing import List, Dict
+from typing import List, Dict, Literal
 from dataclasses import dataclass
+import logging
+from pathlib import Path
+
+LOG_DIR = Path("logs")
+LOG_DIR.mkdir(exist_ok=True)
+
+LOG_FILE = LOG_DIR / "llm_experiments.log"
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(threadName)s | %(message)s",
+    handlers=[logging.FileHandler(LOG_FILE, encoding="utf-8")]
+)
+
+logger = logging.getLogger(__name__)
+
 @dataclass(frozen=True) # make it immutable
 class Experiment:
     """
@@ -64,7 +80,8 @@ class LLMExperimentRunner:
         self.base_delay = base_delay
         self.save_every = save_every
         self.tz = ZoneInfo(timezone)
-
+        self.data_dir = Path("generated_data")
+        self.data_dir.mkdir(exist_ok=True)
         load_dotenv()
         self._init_llm_client()
 
@@ -149,8 +166,7 @@ class LLMExperimentRunner:
         if pd.notna(row["llm_persona"]):
             return idx, None, None
 
-        message = "\n".join(f"{col}: {row[col]}" for col in row.index)
-
+        message = row["raw_persona"]
         for attempt in range(1, self.max_retries + 1):
             try:
                 response_text, date = self.call_llm(persona_system_prompt, message)
@@ -216,13 +232,13 @@ class LLMExperimentRunner:
                 df.at[idx, "persona_generation_date"] = date
 
                 if i > 0 and i % self.save_every == 0:
-                    df.to_csv("persona_checkpoint_file.csv", index=False)
+                    df.to_csv(self.data_dir / "persona_checkpoint_file.csv", index=False)
 
-        df.to_csv("Personas.csv", index=False)
+        df.to_csv(self.data_dir / "Personas.csv", index=False)
         return df
 
             
-    def _run_single_call(self, df, use_persona, idx, row, experiment, col_response):
+    def _run_single_call(self, df, persona, idx, row, experiment, col_response):
         """
         Execute a single experimental LLM call for one row.
 
@@ -230,8 +246,8 @@ class LLMExperimentRunner:
         ----------
         df : pd.DataFrame
             DataFrame being updated.
-        use_persona : bool
-            Whether to condition the system prompt on the row's persona.
+        persona : str
+            What persona condition should be used from [description, raw_persona, no_persona].
         idx : int
             Row index.
         row : pd.Series
@@ -249,24 +265,36 @@ class LLMExperimentRunner:
         # skip if already filled
         if pd.notna(df.at[idx, col_response]):
             return idx, None, None
-
-        if use_persona:
-            system_prompt = textwrap.dedent(f"""
-                Your task is to behave in the way that this Person would behave:
-                {row['llm_persona']}
-                Respond in this format:
-                {experiment.sys_instruction}
-            """).strip()
-        else:
-            system_prompt = textwrap.dedent(f"""
-                Your task is to behave in the way that a Person would behave:
-                Respond in this format:
-                {experiment.sys_instruction}
-            """).strip()
-
+        match persona:
+            case "description":
+                system_prompt = textwrap.dedent(f"""
+                    Your task is to behave in the way that this Person would behave:
+                    {row['llm_persona']}
+                    Respond in this format:
+                    {experiment.sys_instruction}
+                """).strip()
+            case "raw_persona":
+                system_prompt = textwrap.dedent(f"""
+                    Your task is to behave in the way that this Person would behave:
+                    {row['raw_persona']}
+                    Respond in this format:
+                    {experiment.sys_instruction}
+                """).strip()
+            case "no_persona":
+                system_prompt = textwrap.dedent(f"""
+                    Your task is to behave in the way that a Person would behave:
+                    Respond in this format:
+                    {experiment.sys_instruction}
+                """).strip()
+            case _:
+                raise ValueError(f"Unknown persona mode: {persona}\nChoose one of: [description, raw_values, no_persona]")
+        logger.debug(f"Starting call | row={idx} | experiment={col_response} | persona={persona}")
         for attempt in range(1, self.max_retries + 1):
             try:
                 response_text, date = self.call_llm(system_prompt, experiment.prompt)
+                logger.info( # consider removing sysprompt and exp prompt logging
+                    f"SUCCESS | row={idx} | experiment={col_response} | sys_prompt={system_prompt} | experiment_prompt={experiment.prompt}| attempt={attempt}"
+                    )
                 return idx, response_text, date 
 
             except Exception as e:
@@ -274,13 +302,25 @@ class LLMExperimentRunner:
                 if "timeout" in msg or "timed out" in msg:
                     if attempt == self.max_retries:
                         return idx, f"[ERROR: timeout after {self.max_retries} retries]", None
+                    delay_time = self.base_delay * (2 ** (attempt - 1))
+                    time.sleep(delay_time)
+                    logger.warning(
+                        f"TIMEOUT | row={idx} | experiment={col_response} |attempt={attempt}/{self.max_retries} | retrying in {delay_time:.1f}s"
+                    )
 
-                    time.sleep(self.base_delay * (2 ** (attempt - 1)))
                 else:
+                    logger.error(f"FAILED | row={idx} | experiment={col_response} | attempts={self.max_retries}")
+
                     return idx, f"[ERROR: {str(e)}]", None
 
 
-    def run_experiment(self, df: pd.DataFrame, instructions: List[Dict[str, Experiment]], use_persona: bool, save_name: str):
+    def run_experiment(
+        self,
+        df: pd.DataFrame,
+        instructions: List[Dict[str, Experiment]],
+        persona: Literal["description", "raw_values", "no_persona"], 
+        save_name: str
+        ):
         """
         Run a set of experiments on all rows of a DataFrame.
 
@@ -291,8 +331,8 @@ class LLMExperimentRunner:
         instructions : list of dict
             List of experiment dictionaries mapping experiment names
             to `Experiment` objects.
-        use_persona : bool
-            Whether personas should be used in system prompts.
+        persona : str
+            What persona condition should be used from [description, raw_persona, no_persona].
         save_name : str
             Base filename for the final CSV output.
 
@@ -317,7 +357,7 @@ class LLMExperimentRunner:
                     futures = [
                         executor.submit(
                             self._run_single_call,
-                            df, use_persona, row.name, row, experiment, col_response
+                            df, persona, row.name, row, experiment, col_response
                         )
                         for _, row in df.iterrows()
                     ]
@@ -332,9 +372,9 @@ class LLMExperimentRunner:
                         df.at[idx, col_date] = date
 
                         if i > 0 and i % self.save_every == 0:
-                            df.to_csv("experiment_checkpoint_file.csv", index=False)
+                            df.to_csv(self.data_dir / f"experiment_checkpoint_{persona}.csv", index=False)
 
-                df.to_csv("experiment_checkpoint_file.csv", index=False)
+                df.to_csv(self.data_dir / f"experiment_checkpoint_{persona}.csv", index=False)
 
-        df.to_csv(f"{save_name}_{self.model_name}_persona_{use_persona}", index=False)
+        df.to_csv(self.data_dir / f"{save_name}_{self.model_name}_{persona}.csv", index=False)
         return df
