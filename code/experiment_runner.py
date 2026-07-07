@@ -8,23 +8,16 @@ import pandas as pd
 from dotenv import load_dotenv
 from tqdm import tqdm
 from openai import OpenAI
-from typing import List, Dict, Literal
+from typing import List, Dict, Literal, Optional
 from dataclasses import dataclass
 import logging
 from pathlib import Path
 
 LOG_DIR = Path("logs")
 LOG_DIR.mkdir(exist_ok=True)
-
 LOG_FILE = LOG_DIR / "llm_experiments.log"
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(levelname)s | %(threadName)s | %(message)s",
-    handlers=[logging.FileHandler(LOG_FILE, encoding="utf-8")]
-)
-
 logger = logging.getLogger(__name__)
+logger.addHandler(logging.NullHandler())
 
 @dataclass(frozen=True) # make it immutable
 class Experiment:
@@ -41,16 +34,20 @@ class Experiment:
     """
     prompt: str
     sys_instruction: str
+
 class LLMExperimentRunner:
     def __init__(
         self,
         llm_model: str,
+        thinking: Literal["enabled", "disabled"],
+        reasoning_effort: Optional[Literal["high", "max"]],
         temperature: float = 1.0,
         max_workers: int = 10,
         max_retries: int = 3,
         base_delay: float = 3.0,
         save_every: int = 25,
         timezone: str = "Europe/Vienna",
+        enable_logging: bool = False
     ):
         """
         Initialize the experiment runner and LLM client.
@@ -59,7 +56,7 @@ class LLMExperimentRunner:
         ----------
         llm_model : str
             Identifier of the LLM backend to use 
-            Choose between "deepseek-chat V3.2", "qwen", "llama".
+            Choose between "deepseek-v4-pro, "deepseek-v4-flash".
         temperature : float, optional
             Sampling temperature for the LLM, by default 1.0.
         max_workers : int, optional
@@ -72,41 +69,49 @@ class LLMExperimentRunner:
             Save checkpoint CSV every N completed calls, by default 25.
         timezone : str, optional
             Timezone used to localize LLM response timestamps.
+        enable_logging : bool, optional
+            Whether to enable detailed logging for each LLM call.
         """
         self.llm_model = llm_model
         self.temperature = temperature
+        self.thinking = thinking
+        self.reasoning_effort = reasoning_effort
         self.max_workers = max_workers
         self.max_retries = max_retries
         self.base_delay = base_delay
         self.save_every = save_every
         self.tz = ZoneInfo(timezone)
+        self.enable_logging = enable_logging
         self.data_dir = Path("generated_data")
         self.data_dir.mkdir(exist_ok=True)
+        self.logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
+        self._configure_logging()
         load_dotenv()
         self._init_llm_client()
+
+    def _configure_logging(self):
+        """Attach file logging only when requested; otherwise suppress it."""
+        self.logger.propagate = False
+        for handler in list(self.logger.handlers):
+            self.logger.removeHandler(handler)
+            handler.close()
+
+        if self.enable_logging:
+            self.logger.setLevel(logging.DEBUG)
+            handler = logging.FileHandler(LOG_FILE, encoding="utf-8")
+            handler.setFormatter(
+                logging.Formatter("%(asctime)s | %(levelname)s | %(threadName)s | %(message)s")
+            )
+            self.logger.addHandler(handler)
+        else:
+            self.logger.setLevel(logging.CRITICAL + 10)
 
     def _init_llm_client(self):
         """
         Initialize the OpenAI-compatible client for the selected LLM backend.
         """
-        if self.llm_model == "deepseek-chat V3.2":
-            api_key_env = "DEEPSEEK_API_KEY"
-            self.model_name = "deepseek-chat"
-            base_url = "https://api.deepseek.com"
-            
-        # elif self.llm_model == "qwen":
-    #     # ADJUST THIS LATER
-    #     api_key_env = "DEEPSEEK_API_KEY"
-    #     self.model_name = "deepseek-chat"
-    #     base_url = "https://api.deepseek.com"
-        
-    # elif self.llm_model == "llama":
-    #     # ADJUST THIS LATER
-    #     api_key_env = "DEEPSEEK_API_KEY"
-    #     self.model_name = "deepseek-chat"
-    #     base_url = "https://api.deepseek.com"
-        else:
-            raise ValueError(f"Unknown llm_model: {self.llm_model}")
+        api_key_env = "DEEPSEEK_API_KEY"
+        base_url = "https://api.deepseek.com"
 
         self.client = OpenAI(
             api_key=os.environ.get(api_key_env),
@@ -130,15 +135,24 @@ class LLMExperimentRunner:
             The LLM response text and the localized timestamp
             at which the response was created.
         """
-        response = self.client.chat.completions.create(
-            model=self.model_name,
-            messages=[
+        kwargs = {
+            "model": self.llm_model,
+            "messages": [
                 {"role": "system", "content": sys_prompt},
                 {"role": "user", "content": message},
             ],
-            temperature=self.temperature,
-            stream=False
-        )
+            "stream": False,
+        }
+
+        if self.thinking == "enabled":
+            kwargs["extra_body"] = {"thinking": {"type": "enabled"}}
+            if self.reasoning_effort is not None:
+                kwargs["reasoning_effort"] = self.reasoning_effort
+        else:
+            kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
+            kwargs["temperature"] = self.temperature
+
+        response = self.client.chat.completions.create(**kwargs)
 
         date = datetime.fromtimestamp(response.created, tz=self.tz)
         response_text = response.choices[0].message.content
@@ -231,21 +245,19 @@ class LLMExperimentRunner:
                 df.at[idx, "llm_persona"] = response_text
                 df.at[idx, "persona_generation_date"] = date
 
-                if i > 0 and i % self.save_every == 0:
+                if (i + 1) % self.save_every == 0:
                     df.to_csv(self.data_dir / "persona_checkpoint_file.csv", index=False)
 
         df.to_csv(self.data_dir / "Personas.csv", index=False)
         return df
 
             
-    def _run_single_call(self, df, persona, idx, row, experiment, col_response):
+    def _run_single_call(self, persona, idx, row, experiment, col_response):
         """
         Execute a single experimental LLM call for one row.
 
         Parameters
         ----------
-        df : pd.DataFrame
-            DataFrame being updated.
         persona : str
             What persona condition should be used from [description, raw_persona, no_persona].
         idx : int
@@ -263,7 +275,7 @@ class LLMExperimentRunner:
             (row index, response text or error message, response datetime)
         """
         # skip if already filled
-        if pd.notna(df.at[idx, col_response]):
+        if pd.notna(row[col_response]):
             return idx, None, None
         match persona:
             case "description":
@@ -287,29 +299,39 @@ class LLMExperimentRunner:
                     {experiment.sys_instruction}
                 """).strip()
             case _:
-                raise ValueError(f"Unknown persona mode: {persona}\nChoose one of: [description, raw_values, no_persona]")
-        logger.debug(f"Starting call | row={idx} | experiment={col_response} | persona={persona}")
+                raise ValueError(f"Unknown persona mode: {persona}\nChoose one of: [description, raw_persona, no_persona]")
+        self.logger.debug(f"Starting call | row={idx} | experiment={col_response} | persona={persona}")
         for attempt in range(1, self.max_retries + 1):
             try:
                 response_text, date = self.call_llm(system_prompt, experiment.prompt)
-                logger.info( # consider removing sysprompt and exp prompt logging
+                self.logger.info( # consider removing sysprompt and exp prompt logging
                     f"SUCCESS | row={idx} | experiment={col_response} | sys_prompt={system_prompt} | experiment_prompt={experiment.prompt}| attempt={attempt}"
                     )
                 return idx, response_text, date 
 
             except Exception as e:
                 msg = str(e).lower()
-                if "timeout" in msg or "timed out" in msg:
+                retryable_errors = [
+                    "timeout",
+                    "timed out",
+                    "429",
+                    "rate limit",
+                    "500",
+                    "502",
+                    "503",
+                    "connection"
+                ]
+                if any(err in msg for err in retryable_errors):
                     if attempt == self.max_retries:
-                        return idx, f"[ERROR: timeout after {self.max_retries} retries]", None
+                        return idx, f"[ERROR: failed after {self.max_retries} retries: {str(e)}]", None
                     delay_time = self.base_delay * (2 ** (attempt - 1))
                     time.sleep(delay_time)
-                    logger.warning(
+                    self.logger.warning(
                         f"TIMEOUT | row={idx} | experiment={col_response} |attempt={attempt}/{self.max_retries} | retrying in {delay_time:.1f}s"
                     )
 
                 else:
-                    logger.error(f"FAILED | row={idx} | experiment={col_response} | attempts={self.max_retries}")
+                    self.logger.error(f"FAILED | row={idx} | experiment={col_response} | attempts={self.max_retries}")
 
                     return idx, f"[ERROR: {str(e)}]", None
 
@@ -318,7 +340,7 @@ class LLMExperimentRunner:
         self,
         df: pd.DataFrame,
         instructions: List[Dict[str, Experiment]],
-        persona: Literal["description", "raw_values", "no_persona"], 
+        persona: Literal["description", "raw_persona", "no_persona"], 
         save_name: str
         ):
         """
@@ -357,24 +379,28 @@ class LLMExperimentRunner:
                     futures = [
                         executor.submit(
                             self._run_single_call,
-                            df, persona, row.name, row, experiment, col_response
+                            persona, row.name, row, experiment, col_response
                         )
                         for _, row in df.iterrows()
                     ]
 
                     for i, future in enumerate(tqdm(as_completed(futures), total=len(futures), leave=False)):
-                        idx, response_text, date = future.result()
-
+                        try:
+                            idx, response_text, date = future.result()
+                        except Exception as e:
+                            self.logger.error(f"Unexpected error in future: {e}")
+                            continue
+                        
                         if response_text is None:
                             continue
 
                         df.at[idx, col_response] = response_text
                         df.at[idx, col_date] = date
 
-                        if i > 0 and i % self.save_every == 0:
+                        if (i + 1) % self.save_every == 0:
                             df.to_csv(self.data_dir / f"experiment_checkpoint_{persona}.csv", index=False)
 
                 df.to_csv(self.data_dir / f"experiment_checkpoint_{persona}.csv", index=False)
 
-        df.to_csv(self.data_dir / f"{save_name}_{self.model_name}_{persona}.csv", index=False)
+        df.to_csv(self.data_dir / f"{save_name}_{self.llm_model}_{persona}.csv", index=False)
         return df
