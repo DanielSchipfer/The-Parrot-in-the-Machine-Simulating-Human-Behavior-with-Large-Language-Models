@@ -38,9 +38,9 @@ class Experiment:
 class LLMExperimentRunner:
     def __init__(
         self,
-        llm_model: str,
+        llm_model: Literal["deepseek-v4-pro", "deepseek-v4-flash", "marcelbinz/Llama-3.1-Centaur-70B"],
         thinking: Literal["enabled", "disabled"],
-        reasoning_effort: Optional[Literal["high", "max"]],
+        reasoning_effort: Optional[Literal["high", "max"]] = None,
         temperature: float = 1.0,
         max_workers: int = 10,
         max_retries: int = 3,
@@ -110,11 +110,26 @@ class LLMExperimentRunner:
         """
         Initialize the OpenAI-compatible client for the selected LLM backend.
         """
-        api_key_env = "DEEPSEEK_API_KEY"
-        base_url = "https://api.deepseek.com"
+        if self.llm_model  in ["deepseek-v4-pro", "deepseek-v4-flash"]:
+            api_key_env = "DEEPSEEK_API_KEY"
+            base_url = "https://api.deepseek.com"
+
+        elif self.llm_model in ["marcelbinz/Llama-3.1-Centaur-70B"]:
+            api_key_env = "FEATHERLESS_API"
+            base_url = "https://api.featherless.ai/v1"
+            
+        else:
+            raise ValueError(f"Unknown llm_model: {self.llm_model}")
+
+        api_key = os.environ.get(api_key_env)
+        if not api_key:
+            raise ValueError(
+                f"Missing API key for model '{self.llm_model}'. "
+                f"Set the '{api_key_env}' environment variable in your .env file."
+            )
 
         self.client = OpenAI(
-            api_key=os.environ.get(api_key_env),
+            api_key=api_key,
             base_url=base_url
         )
 
@@ -339,7 +354,7 @@ class LLMExperimentRunner:
     def run_experiment(
         self,
         df: pd.DataFrame,
-        instructions: List[Dict[str, Experiment]],
+        instructions: Dict[str, Experiment],
         persona: Literal["description", "raw_persona", "no_persona"], 
         save_name: str
         ):
@@ -350,9 +365,8 @@ class LLMExperimentRunner:
         ----------
         df : pd.DataFrame
             Input DataFrame.
-        instructions : list of dict
-            List of experiment dictionaries mapping experiment names
-            to `Experiment` objects.
+        instructions : dict
+            Dictionary mapping experiment names to `Experiment` objects.
         persona : str
             What persona condition should be used from [description, raw_persona, no_persona].
         save_name : str
@@ -363,44 +377,48 @@ class LLMExperimentRunner:
         pd.DataFrame
             The DataFrame augmented with experiment responses and timestamps.
         """
-        for experiment_dict in tqdm(instructions, desc="Experiments"):
-            for experiment_name, experiment in experiment_dict.items():
+        df = df.copy()
+        completed = 0
+        for experiment_name, experiment in tqdm(instructions.items(), desc="Experiments"):
+            checkpoint_save = (self.data_dir / f"experiment_checkpoint_{persona}_{self.llm_model}_{experiment_name}.csv")
+            if checkpoint_save.exists():
+                df = pd.read_csv(checkpoint_save)
 
-                col_response = f"{experiment_name}_experiment_{self.llm_model}"
-                col_date = f"{col_response}_date"
+            col_response = f"{experiment_name}_{self.llm_model}"
+            col_date = f"{col_response}_date"
 
-                if col_response not in df.columns:
-                    df[col_response] = None
+            if col_response not in df.columns:
+                df[col_response] = None
+                
+            if col_date not in df.columns:
+                df[col_date] = None
+
+            with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+                futures = [
+                    executor.submit(
+                        self._run_single_call,
+                        persona, row.name, row, experiment, col_response
+                    )
+                    for _, row in df.iterrows() if pd.isna(row[col_response])
+                ]
+
+                for future in tqdm(as_completed(futures), total=len(futures), leave=False):
+                    try:
+                        idx, response_text, date = future.result()
+                    except Exception as e:
+                        self.logger.error(f"Unexpected error in future: {e}")
+                        continue
                     
-                if col_date not in df.columns:
-                    df[col_date] = None
+                    if response_text is None:
+                        continue
 
-                with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-                    futures = [
-                        executor.submit(
-                            self._run_single_call,
-                            persona, row.name, row, experiment, col_response
-                        )
-                        for _, row in df.iterrows()
-                    ]
+                    df.at[idx, col_response] = response_text
+                    df.at[idx, col_date] = date
+                    completed += 1
+                    if completed % self.save_every == 0:
+                        df.to_csv(checkpoint_save, index=False)
 
-                    for i, future in enumerate(tqdm(as_completed(futures), total=len(futures), leave=False)):
-                        try:
-                            idx, response_text, date = future.result()
-                        except Exception as e:
-                            self.logger.error(f"Unexpected error in future: {e}")
-                            continue
-                        
-                        if response_text is None:
-                            continue
-
-                        df.at[idx, col_response] = response_text
-                        df.at[idx, col_date] = date
-
-                        if (i + 1) % self.save_every == 0:
-                            df.to_csv(self.data_dir / f"experiment_checkpoint_{persona}.csv", index=False)
-
-                df.to_csv(self.data_dir / f"experiment_checkpoint_{persona}.csv", index=False)
+            df.to_csv(checkpoint_save, index=False)
 
         df.to_csv(self.data_dir / f"{save_name}_{self.llm_model}_{persona}.csv", index=False)
         return df
