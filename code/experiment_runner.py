@@ -46,6 +46,7 @@ class LLMExperimentRunner:
         max_retries: int = 3,
         base_delay: float = 3.0,
         save_every: int = 25,
+        use_checkpoint: bool = True,
         timezone: str = "Europe/Vienna",
         enable_logging: bool = False
     ):
@@ -80,10 +81,13 @@ class LLMExperimentRunner:
         self.max_retries = max_retries
         self.base_delay = base_delay
         self.save_every = save_every
+        self.use_checkpoint = use_checkpoint
         self.tz = ZoneInfo(timezone)
         self.enable_logging = enable_logging
         self.data_dir = Path("generated_data")
         self.data_dir.mkdir(exist_ok=True)
+        self.checkpoint_dir = self.data_dir / "checkpoints"
+        self.checkpoint_dir.mkdir(exist_ok=True)
         self.logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
         self._configure_logging()
         load_dotenv()
@@ -380,8 +384,8 @@ class LLMExperimentRunner:
         df = df.copy()
         completed = 0
         for experiment_name, experiment in tqdm(instructions.items(), desc="Experiments"):
-            checkpoint_save = (self.data_dir / f"experiment_checkpoint_{persona}_{self.llm_model}_{experiment_name}.csv")
-            if checkpoint_save.exists():
+            checkpoint_save = (self.checkpoint_dir / f"{persona}_{self.llm_model}_{experiment_name}_experiment_checkpoint.csv")
+            if self.use_checkpoint and checkpoint_save.exists():
                 df = pd.read_csv(checkpoint_save)
 
             col_response = f"{experiment_name}_{self.llm_model}"
