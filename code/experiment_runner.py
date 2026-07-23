@@ -38,7 +38,7 @@ class Experiment:
 class LLMExperimentRunner:
     def __init__(
         self,
-        llm_model: Literal["deepseek-v4-pro", "deepseek-v4-flash", "marcelbinz/Llama-3.1-Centaur-70B"],
+        llm: Literal["deepseek-v4-pro", "deepseek-v4-flash", "marcelbinz/Llama-3.1-Centaur-70B"],
         thinking: Literal["enabled", "disabled"],
         reasoning_effort: Optional[Literal["high", "max"]] = None,
         temperature: float = 1.0,
@@ -55,7 +55,7 @@ class LLMExperimentRunner:
 
         Parameters
         ----------
-        llm_model : str
+        llm : str
             Identifier of the LLM backend to use 
             Choose between "deepseek-v4-pro, "deepseek-v4-flash".
         temperature : float, optional
@@ -73,7 +73,7 @@ class LLMExperimentRunner:
         enable_logging : bool, optional
             Whether to enable detailed logging for each LLM call.
         """
-        self.llm_model = llm_model
+        self.llm = llm
         self.temperature = temperature
         self.thinking = thinking
         self.reasoning_effort = reasoning_effort
@@ -114,21 +114,21 @@ class LLMExperimentRunner:
         """
         Initialize the OpenAI-compatible client for the selected LLM backend.
         """
-        if self.llm_model  in ["deepseek-v4-pro", "deepseek-v4-flash"]:
+        if self.llm  in ["deepseek-v4-pro", "deepseek-v4-flash"]:
             api_key_env = "DEEPSEEK_API_KEY"
             base_url = "https://api.deepseek.com"
 
-        elif self.llm_model in ["marcelbinz/Llama-3.1-Centaur-70B"]:
+        elif self.llm in ["marcelbinz/Llama-3.1-Centaur-70B"]:
             api_key_env = "FEATHERLESS_API"
             base_url = "https://api.featherless.ai/v1"
             
         else:
-            raise ValueError(f"Unknown llm_model: {self.llm_model}")
+            raise ValueError(f"Unknown llm: {self.llm}")
 
         api_key = os.environ.get(api_key_env)
         if not api_key:
             raise ValueError(
-                f"Missing API key for model '{self.llm_model}'. "
+                f"Missing API key for model '{self.llm}'. "
                 f"Set the '{api_key_env}' environment variable in your .env file."
             )
 
@@ -155,7 +155,7 @@ class LLMExperimentRunner:
             at which the response was created.
         """
         kwargs = {
-            "model": self.llm_model,
+            "model": self.llm,
             "messages": [
                 {"role": "system", "content": sys_prompt},
                 {"role": "user", "content": message},
@@ -360,7 +360,7 @@ class LLMExperimentRunner:
         df: pd.DataFrame,
         instructions: Dict[str, Experiment],
         persona: Literal["description", "raw_persona", "no_persona"], 
-        save_name: str
+        run_id="",
         ):
         """
         Run a set of experiments on all rows of a DataFrame.
@@ -384,11 +384,11 @@ class LLMExperimentRunner:
         df = df.copy()
         completed = 0
         for experiment_name, experiment in tqdm(instructions.items(), desc="Experiments"):
-            checkpoint_save = (self.checkpoint_dir / f"{persona}_{self.llm_model}_{experiment_name}_experiment_checkpoint.csv")
+            checkpoint_save = (self.checkpoint_dir / f"{persona}_{self.llm}_{run_id}_{experiment_name}_experiment_checkpoint.csv")
             if self.use_checkpoint and checkpoint_save.exists():
                 df = pd.read_csv(checkpoint_save)
 
-            col_response = f"{experiment_name}_{self.llm_model}"
+            col_response = f"{experiment_name}_{self.llm}"
             col_date = f"{col_response}_date"
 
             if col_response not in df.columns:
@@ -423,6 +423,4 @@ class LLMExperimentRunner:
                         df.to_csv(checkpoint_save, index=False)
 
             df.to_csv(checkpoint_save, index=False)
-
-        df.to_csv(self.data_dir / f"{save_name}_{self.llm_model}_{persona}.csv", index=False)
         return df
