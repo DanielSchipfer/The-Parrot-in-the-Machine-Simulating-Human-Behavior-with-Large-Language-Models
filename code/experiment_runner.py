@@ -381,13 +381,15 @@ class LLMExperimentRunner:
         pd.DataFrame
             The DataFrame augmented with experiment responses and timestamps.
         """
-        df = df.copy()
-        completed = 0
-        for experiment_name, experiment in tqdm(instructions.items(), desc="Experiments"):
-            checkpoint_save = (self.checkpoint_dir / f"{persona}_{self.llm}_{run_id}_{experiment_name}_experiment_checkpoint.csv")
-            if self.use_checkpoint and checkpoint_save.exists():
-                df = pd.read_csv(checkpoint_save)
+        checkpoint_save = (self.checkpoint_dir / f"{run_id}_{self.llm}_{persona}_{self.thinking}_checkpoint.csv")
 
+        if self.use_checkpoint and checkpoint_save.exists():
+            df = pd.read_csv(checkpoint_save, index_col=0)
+
+        df = df.copy()
+        for experiment_name, experiment in tqdm(instructions.items(), desc=f"Experiment:"):
+            print(f"Experiment: {experiment_name}")
+            completed = 0
             col_response = f"{experiment_name}_{self.llm}"
             col_date = f"{col_response}_date"
 
@@ -420,7 +422,7 @@ class LLMExperimentRunner:
                     df.at[idx, col_date] = date
                     completed += 1
                     if completed % self.save_every == 0:
-                        df.to_csv(checkpoint_save, index=False)
+                        df.to_csv(checkpoint_save, index=True)
 
-            df.to_csv(checkpoint_save, index=False)
+            df.to_csv(checkpoint_save, index=True)
         return df

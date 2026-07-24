@@ -168,17 +168,169 @@ def get_serial_position_effect_experiments(persona: Literal["description", "raw_
     system_prompt = get_system_prompt(persona=persona)
 
     base_prompt = textwrap.dedent(
-        """You are participating in a memory experiment.
-        You will be presented with a list of words, one at a time.
-        After the list is presented, you will be asked to recall as many words as you can remember from the list.\n"""
-    )
-
+        """
+        You are participating in a memory experiment.
+        You will be shown a list of words, one word per line.
+        Read the entire list carefully.
+        After reading the list, recall as many of the words as you can remember.
+        Output only the words you remember, seperated by a comma.
+        Do not invent words that were not in the list.
+        The order in which you recall the words does not matter.
+        This is the list:
+        """)
+    # each list contains unique words within that list (the 40 word list contains 20 words from the 20 word list, the 80 word list contains 40 from the 40)
     prompts = {
-        "Primacy_Effect": (
-            "INSERT PROMPT FOR PRIMACY EFFECT HERE"
+        "Serial_Position_Effect_20": textwrap.dedent(
+            """
+            apple
+            river
+            chair
+            mountain
+            window
+            pencil
+            forest
+            bottle
+            garden
+            clock
+            bridge
+            orange
+            blanket
+            hammer
+            candle
+            ladder
+            ocean
+            basket
+            camera
+            feather
+            """
         ),
-        "Recency_Effect": (
-            "INSERT PROMPT FOR RECENCY EFFECT HERE"
+        "Serial_Position_Effect_40": textwrap.dedent(
+            """
+            apple
+            river
+            chair
+            mountain
+            window
+            pencil
+            forest
+            bottle
+            garden
+            clock
+            bridge
+            orange
+            blanket
+            hammer
+            candle
+            ladder
+            ocean
+            basket
+            camera
+            feather
+            guitar
+            rabbit
+            island
+            mirror
+            rocket
+            cookie
+            helmet
+            lantern
+            flower
+            suitcase
+            butterfly
+            castle
+            newspaper
+            violin
+            backpack
+            turtle
+            snowflake
+            diamond
+            rainbow
+            airplane
+            """
+        ),
+        "Serial_Position_Effect_80": textwrap.dedent(
+            """
+            apple
+            river
+            chair
+            mountain
+            window
+            pencil
+            forest
+            bottle
+            garden
+            clock
+            bridge
+            orange
+            blanket
+            hammer
+            candle
+            ladder
+            ocean
+            basket
+            camera
+            feather
+            guitar
+            rabbit
+            island
+            mirror
+            rocket
+            cookie
+            helmet
+            lantern
+            flower
+            suitcase
+            butterfly
+            castle
+            newspaper
+            violin
+            backpack
+            turtle
+            snowflake
+            diamond
+            rainbow
+            airplane
+            anchor
+            balloon
+            beach
+            cactus
+            dolphin
+            eagle
+            factory
+            glove
+            horizon
+            jacket
+            key
+            library
+            magnet
+            notebook
+            owl
+            pillow
+            quilt
+            rope
+            sandal
+            teapot
+            umbrella
+            volcano
+            whistle
+            yacht
+            zebra
+            acorn
+            beehive
+            compass
+            drum
+            engine
+            fountain
+            garage
+            harvest
+            igloo
+            jungle
+            kettle
+            lighthouse
+            meadow
+            nest
+            orchard
+            """
         )
 
     }
@@ -191,6 +343,160 @@ def get_serial_position_effect_experiments(persona: Literal["description", "raw_
         for name, prompt in prompts.items()
     }
 
+def get_big_five_aspects_questionaire(persona: Literal["description", "raw_persona", "no_persona"]) -> Dict[str, Experiment]:
+
+    system_prompt = get_system_prompt(persona=persona)
+    # adapted from https://psytests.org/big5/bfasen-run.html?utm_source=chatgpt.com
+    base_prompt = textwrap.dedent(
+        """
+        You will be provided with a phrase describing people's behaviors. 
+        Describe yourself as you generally are now, not as you wish to be in the future.
+        Describe yourself as you honestly see yourself, in relation to other people you know of the same sex as you are, and roughly your same age.
+        Answer only with a single number from 1 to 5 that corresponds to how accurately the statement describes you.
+        1 - Very Inaccurate
+        2 - Moderately Inaccurate
+        3 - Neither Accurate, Nor Inaccurate
+        4 - Moderately Accurate
+        5 - Very Accurate
+
+        Rate the following statement:
+        """
+    )
+
+    prompts = {
+        "Volatility_1": (
+            "get angry easily"
+        ),
+        "Volatility_2_R": (
+            "am not easily annoyed"
+        ),
+        "Volatility_3": (
+            "get easily agitated"
+        ),
+        "Volatility_4": (
+            "can be stirred up easily"
+        ),
+        "Withdrawal_1_R": (
+            "rarely feel depressed"
+        ),
+        "Withdrawal_2": (
+            "worry about things"
+        ),
+        "Withdrawal_3_R": (
+            "am not embarrassed easily"
+        ),
+        "Withdrawal_4": (
+            "become overwhelmed by events"
+        ),
+
+        "Compassion_1": (
+            "feel others' emotions"
+        ),
+        "Compassion_2": (
+            "inquire about others' well-being"
+        ),
+        "Compassion_3_R": (
+            "can't be bothered with other's needs"
+        ),
+        "Compassion_4": (
+            "take an interest in other people's lives"
+        ),
+        "Politeness_1_R": (
+            "insult people"
+        ),
+        "Politeness_2_R": (
+            "believe that I am better than others"
+        ),
+        "Politeness_3": (
+            "rarely put people under pressure"
+        ),
+        "Politeness_4_R": (
+            "seek conflict"
+        ),
+
+        "Industriousness_1_R": (
+            "waste my time"
+        ),
+        "Industriousness_2_R": (
+            "find it difficult to get down to work"
+        ),
+        "Industriousness_3_R": (
+            "mess things up"
+        ),
+        "Industriousness_4_R": (
+            "am easily distracted"
+        ),
+        "Orderliness_1": (
+            "like order"
+        ),
+        "Orderliness_2": (
+            "keep things tidy"
+        ),
+        "Orderliness_3_R": (
+            "am not bothered by disorder"
+        ),
+        "Orderliness_4": (
+            "see that rules are observed"
+        ),
+
+        "Enthusiasm_1_R": (
+            "keep others at a distance"
+        ),
+        "Enthusiasm_2_R": (
+            "reveal little about myself"
+        ),
+        "Enthusiasm_3": (
+            "warm up quickly to others"
+        ),
+        "Enthusiasm_4_R": (
+            "am not a very enthusiastic person"
+        ),
+        "Assertiveness_1": (
+            "take charge"
+        ),
+        "Assertiveness_2_R": (
+            "lack the talent for influencing people"
+        ),
+        "Assertiveness_3_R": (
+            "wait for others to lead the way"
+        ),
+        "Assertiveness_4": (
+            "see myself as a good leader"
+        ),
+
+        "Openness_1": (
+            "love to reflect on things"
+        ),
+        "Openness_2": (
+            "see beauty in things that others might not notice"
+        ),
+        "Openness_3_R": (
+            "seldom daydream"
+        ),
+        "Openness_4_R": (
+            "seldom notice the emotional aspects of paintings and pictures"
+        ),
+        "Intellect_1": (
+            "am quick to understand things"
+        ),
+        "Intellect_2_R": (
+            "have difficulty understanding abstract ideas"
+        ),
+        "Intellect_3": (
+            "can handle a lot of information"
+        ),
+        "Intellect_4_R": (
+            "avoid difficult reading material"
+        )
+    }
+
+    return {
+        name: Experiment(
+            prompt=base_prompt + prompt,
+            sys_instruction=system_prompt
+        )
+        for name, prompt in prompts.items()
+    }
 
 if __name__ == "__main__":
     # gamblers_fallacy_experiments = get_gamblers_fallacy_experiments(max_previous_outcomes=10, persona="raw_persona")
@@ -209,8 +515,8 @@ if __name__ == "__main__":
     #     print(experiment.prompt)
     #     print()
 
-    gamblers_fallacy = get_gamblers_fallacy_experiments(10, "description", 2)
-    for name, experiment in gamblers_fallacy.items():
+    test = get_serial_position_effect_experiments("description")
+    for name, experiment in test.items():
         print(f"{name}")
         print("-" * 50)
         print(experiment.prompt)
