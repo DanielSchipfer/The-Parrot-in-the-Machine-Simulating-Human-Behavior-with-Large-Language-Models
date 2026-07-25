@@ -1,6 +1,6 @@
 import os
 import time
-import textwrap
+import json
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -264,21 +264,23 @@ class LLMExperimentRunner:
                 df.at[idx, "llm_persona"] = response_text
                 df.at[idx, "persona_generation_date"] = date
 
-                if (i + 1) % self.save_every == 0:
-                    df.to_csv(self.data_dir / "persona_checkpoint_file.csv", index=False)
-
         df.to_csv(self.data_dir / "Personas.csv", index=False)
         return df
 
             
-    def _run_single_call(self, persona, idx, row, experiment, col_response):
+    def _run_single_call(
+            self,
+            idx: int,
+            row: pd.Series,
+            experiment_name: str,
+            experiment: Experiment,
+            col_response: str
+            ):
         """
         Execute a single experimental LLM call for one row.
 
         Parameters
         ----------
-        persona : str
-            What persona condition should be used from [description, raw_persona, no_persona].
         idx : int
             Row index.
         row : pd.Series
@@ -296,35 +298,31 @@ class LLMExperimentRunner:
         # skip if already filled
         if pd.notna(row[col_response]):
             return idx, None, None
-        match persona:
-            case "description":
-                system_prompt = textwrap.dedent(f"""
-                    Your task is to behave in the way that this Person would behave:
-                    {row['llm_persona']}
-                    Respond in this format:
-                    {experiment.sys_instruction}
-                """).strip()
-            case "raw_persona":
-                system_prompt = textwrap.dedent(f"""
-                    Your task is to behave in the way that this Person would behave:
-                    {row['raw_persona']}
-                    Respond in this format:
-                    {experiment.sys_instruction}
-                """).strip()
-            case "no_persona":
-                system_prompt = textwrap.dedent(f"""
-                    Your task is to behave in the way that a Person would behave:
-                    Respond in this format:
-                    {experiment.sys_instruction}
-                """).strip()
-            case _:
-                raise ValueError(f"Unknown persona mode: {persona}\nChoose one of: [description, raw_persona, no_persona]")
-        self.logger.debug(f"Starting call | row={idx} | experiment={col_response} | persona={persona}")
+        system_prompt = experiment.sys_instruction.format(
+            description=row["llm_persona"],
+            raw_persona=row["raw_persona"],
+            no_persona=f"Age: {row['Age']}\nGender: {row['Gender']}"
+        )
+        if experiment_name.startswith("Serial_Position_Effect"):
+            map_size = experiment_name.split("_")[-1]
+            word_map = json.loads(
+                row[f"serial_position_effect_map_{map_size}"]
+            )
+
+            experiment_prompt = experiment.prompt.format(
+                **{
+                    f"Serial_Position_Effect_{map_size}":
+                    "\n".join(word_map.keys())
+                }
+            )
+        else:
+            experiment_prompt = experiment.prompt
+        self.logger.debug(f"Starting call | row={idx} | experiment={col_response}")
         for attempt in range(1, self.max_retries + 1):
             try:
-                response_text, date = self.call_llm(system_prompt, experiment.prompt)
+                response_text, date = self.call_llm(system_prompt, experiment_prompt)
                 self.logger.info( # consider removing sysprompt and exp prompt logging
-                    f"SUCCESS | row={idx} | experiment={col_response} | sys_prompt={system_prompt} | experiment_prompt={experiment.prompt}| attempt={attempt}"
+                    f"SUCCESS | row={idx} | experiment={col_response} | sys_prompt={system_prompt} | experiment_prompt={experiment_prompt}| attempt={attempt}"
                     )
                 return idx, response_text, date 
 
@@ -381,14 +379,12 @@ class LLMExperimentRunner:
         pd.DataFrame
             The DataFrame augmented with experiment responses and timestamps.
         """
-        checkpoint_save = (self.checkpoint_dir / f"{run_id}_{self.llm}_{persona}_{self.thinking}_checkpoint.csv")
-
-        if self.use_checkpoint and checkpoint_save.exists():
-            df = pd.read_csv(checkpoint_save, index_col=0)
-
-        df = df.copy()
+        
         for experiment_name, experiment in tqdm(instructions.items(), desc=f"Experiment:"):
-            print(f"Experiment: {experiment_name}")
+            checkpoint_save = (self.checkpoint_dir / f"{experiment_name}_{run_id}_{self.llm}_{persona}_{self.thinking}_checkpoint.csv")
+            if self.use_checkpoint and checkpoint_save.exists():
+                df = pd.read_csv(checkpoint_save, index_col=0)
+            df = df.copy()
             completed = 0
             col_response = f"{experiment_name}_{self.llm}"
             col_date = f"{col_response}_date"
@@ -403,7 +399,7 @@ class LLMExperimentRunner:
                 futures = [
                     executor.submit(
                         self._run_single_call,
-                        persona, row.name, row, experiment, col_response
+                        row.name, row, experiment_name, experiment, col_response
                     )
                     for _, row in df.iterrows() if pd.isna(row[col_response])
                 ]

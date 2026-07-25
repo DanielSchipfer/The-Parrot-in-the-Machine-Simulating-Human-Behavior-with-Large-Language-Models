@@ -19,7 +19,7 @@ def get_gamblers_fallacy_experiments(
     The individual you are simulating is playing roulette and can either bet on black or red.
     Pick the choice that is most consistent with the described individual's behavioral tendencies.
     Your response should be a single word containing the individuals choice.
-    {history}What would the person choose?
+    {history}What would the person choose? Respond only with A or B.
     """).strip()
 
     experiments = {}
@@ -53,7 +53,7 @@ def get_loss_aversion_experiments(persona: Literal["description", "raw_persona",
 
     base_prompt = (
         "You take part in a study evaluating peoples' choices among risky prospects. There is no 'correct' answer. "
-        "You can answer with either A or B.\n"
+        "Respond with either A or B.\n"
     )
 
     prompts = {
@@ -126,7 +126,7 @@ You are now asked to choose between
         "Loss_Aversion_12": (
 f"""In addition to whatever you own, you have been given 2,000.
 You are now asked to choose between
-{format_by_group("(1,000 with probability .50)", "(500 with certainty", group)}"""
+{format_by_group("(1,000 with probability .50)", "(500 with certainty)", group)}"""
         ),
 
         "Loss_Aversion_13": format_by_group(
@@ -143,7 +143,7 @@ You are now asked to choose between
 
         "Loss_Aversion_14": format_by_group(
             "(5,000 with probability .001)",
-            "5 with certainty)",
+            "(5 with certainty)",
             group
         ),
 
@@ -172,169 +172,16 @@ def get_serial_position_effect_experiments(persona: Literal["description", "raw_
         You are participating in a memory experiment.
         You will be shown a list of words, one word per line.
         Read the entire list carefully.
-        After reading the list, recall as many of the words as you can remember.
-        Output only the words you remember, seperated by a comma.
         Do not invent words that were not in the list.
         The order in which you recall the words does not matter.
-        This is the list:
+        After reading the following list, recall as many of the words as you can remember and output only the words you remember separated by a comma:
+        -----------------------------------------\n
         """)
-    # each list contains unique words within that list (the 40 word list contains 20 words from the 20 word list, the 80 word list contains 40 from the 40)
     prompts = {
-        "Serial_Position_Effect_20": textwrap.dedent(
-            """
-            apple
-            river
-            chair
-            mountain
-            window
-            pencil
-            forest
-            bottle
-            garden
-            clock
-            bridge
-            orange
-            blanket
-            hammer
-            candle
-            ladder
-            ocean
-            basket
-            camera
-            feather
-            """
-        ),
-        "Serial_Position_Effect_40": textwrap.dedent(
-            """
-            apple
-            river
-            chair
-            mountain
-            window
-            pencil
-            forest
-            bottle
-            garden
-            clock
-            bridge
-            orange
-            blanket
-            hammer
-            candle
-            ladder
-            ocean
-            basket
-            camera
-            feather
-            guitar
-            rabbit
-            island
-            mirror
-            rocket
-            cookie
-            helmet
-            lantern
-            flower
-            suitcase
-            butterfly
-            castle
-            newspaper
-            violin
-            backpack
-            turtle
-            snowflake
-            diamond
-            rainbow
-            airplane
-            """
-        ),
-        "Serial_Position_Effect_80": textwrap.dedent(
-            """
-            apple
-            river
-            chair
-            mountain
-            window
-            pencil
-            forest
-            bottle
-            garden
-            clock
-            bridge
-            orange
-            blanket
-            hammer
-            candle
-            ladder
-            ocean
-            basket
-            camera
-            feather
-            guitar
-            rabbit
-            island
-            mirror
-            rocket
-            cookie
-            helmet
-            lantern
-            flower
-            suitcase
-            butterfly
-            castle
-            newspaper
-            violin
-            backpack
-            turtle
-            snowflake
-            diamond
-            rainbow
-            airplane
-            anchor
-            balloon
-            beach
-            cactus
-            dolphin
-            eagle
-            factory
-            glove
-            horizon
-            jacket
-            key
-            library
-            magnet
-            notebook
-            owl
-            pillow
-            quilt
-            rope
-            sandal
-            teapot
-            umbrella
-            volcano
-            whistle
-            yacht
-            zebra
-            acorn
-            beehive
-            compass
-            drum
-            engine
-            fountain
-            garage
-            harvest
-            igloo
-            jungle
-            kettle
-            lighthouse
-            meadow
-            nest
-            orchard
-            """
-        )
-
-    }
-
+        "Serial_Position_Effect_20": "{Serial_Position_Effect_20}",
+        "Serial_Position_Effect_40": "{Serial_Position_Effect_40}",
+        "Serial_Position_Effect_80": "{Serial_Position_Effect_80}",
+        }
     return {
         name: Experiment(
             prompt=base_prompt + prompt,
@@ -499,25 +346,35 @@ def get_big_five_aspects_questionaire(persona: Literal["description", "raw_perso
     }
 
 if __name__ == "__main__":
-    # gamblers_fallacy_experiments = get_gamblers_fallacy_experiments(max_previous_outcomes=10, persona="raw_persona")
+    import pandas as pd
+    import json
 
-    # # Print the names of the experiments
-    # print("Gamblers Fallacy prompt:",(gamblers_fallacy_experiments["Gamblers_Fallacy_0"].prompt))
-    # print("-"*50)
-    # print("Gamblers Fallacy sys:",(gamblers_fallacy_experiments["Gamblers_Fallacy_0"].sys_instruction))
-    # loss_aversion = get_loss_aversion_experiments("description", 1)
-    # print(loss_aversion["Loss_Aversion_1"].sys_instruction)
-    # print("---------------------------------------------------------------")
-    # print(loss_aversion["Loss_Aversion_1"].prompt)
-    # for name, experiment in loss_aversion.items():
-    #     print(f"{name}")
-    #     print("-" * 50)
-    #     print(experiment.prompt)
-    #     print()
+    df = pd.read_csv("/home/daniel/Desktop/Master_Thesis/code/2_personas_test.csv")
 
     test = get_serial_position_effect_experiments("description")
+
+    # test one simulated person
+    row = df.iloc[0]
+
     for name, experiment in test.items():
-        print(f"{name}")
+
+        map_size = name.split("_")[-1]  # extracts 20, 40, or 80
+
+        word_map = json.loads(
+            row[f"serial_position_effect_map_{map_size}"]
+        )
+
+        formatted_prompt = experiment.prompt.format(
+            **{
+                f"Serial_Position_Effect_{map_size}":
+                "\n".join(word_map.keys())
+            }
+        )
+
+        print(name)
         print("-" * 50)
-        print(experiment.prompt)
+        print(formatted_prompt)
         print()
+        print("Position map:")
+        print(word_map)
+        print("=" * 80)
