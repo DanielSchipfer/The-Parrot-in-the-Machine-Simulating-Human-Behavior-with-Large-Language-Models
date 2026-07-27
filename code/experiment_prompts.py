@@ -18,8 +18,8 @@ def get_gamblers_fallacy_experiments(
     BASE_PROMPT = textwrap.dedent("""                                                       
     The individual you are simulating is playing roulette and can either bet on black or red.
     Pick the choice that is most consistent with the described individual's behavioral tendencies.
+    {history}What would the person choose? 
     Your response should be a single word containing the individuals choice.
-    {history}What would the person choose? Respond only with A or B.
     """).strip()
 
     experiments = {}
@@ -171,10 +171,10 @@ def get_serial_position_effect_experiments(persona: Literal["description", "raw_
         """
         You are participating in a memory experiment.
         You will be shown a list of words, one word per line.
-        Read the entire list carefully.
-        Do not invent words that were not in the list.
-        The order in which you recall the words does not matter.
-        After reading the following list, recall as many of the words as you can remember and output only the words you remember separated by a comma:
+        Do not invent words.
+        The order does not matter.
+        Read the following list carefully. After reading it, recall as many words as you can remember.
+        Output only the remembered words separated by commas.
         -----------------------------------------\n
         """)
     prompts = {

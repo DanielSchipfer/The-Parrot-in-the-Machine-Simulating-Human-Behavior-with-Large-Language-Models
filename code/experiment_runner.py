@@ -320,6 +320,14 @@ class LLMExperimentRunner:
         self.logger.debug(f"Starting call | row={idx} | experiment={col_response}")
         for attempt in range(1, self.max_retries + 1):
             try:
+                # # TEST
+                # print("=" * 80)
+                # print(system_prompt)
+                # print("-" * 80)
+                # print(experiment_prompt)
+                # print("=" * 80)
+                # return idx, "[TEST]", None
+
                 response_text, date = self.call_llm(system_prompt, experiment_prompt)
                 self.logger.info( # consider removing sysprompt and exp prompt logging
                     f"SUCCESS | row={idx} | experiment={col_response} | sys_prompt={system_prompt} | experiment_prompt={experiment_prompt}| attempt={attempt}"
