@@ -273,8 +273,7 @@ class LLMExperimentRunner:
             idx: int,
             row: pd.Series,
             experiment_name: str,
-            experiment: Experiment,
-            col_response: str
+            experiment: Experiment
             ):
         """
         Execute a single experimental LLM call for one row.
@@ -287,8 +286,6 @@ class LLMExperimentRunner:
             DataFrame row.
         experiment : Experiment
             Experiment definition containing prompt and instructions.
-        col_response : str
-            Column name where the response will be stored.
 
         Returns
         -------
@@ -296,7 +293,7 @@ class LLMExperimentRunner:
             (row index, response text or error message, response datetime)
         """
         # skip if already filled
-        if pd.notna(row[col_response]):
+        if pd.notna(row[experiment_name]):
             return idx, None, None
         system_prompt = experiment.sys_instruction.format(
             description=row["llm_persona"],
@@ -317,7 +314,7 @@ class LLMExperimentRunner:
             )
         else:
             experiment_prompt = experiment.prompt
-        self.logger.debug(f"Starting call | row={idx} | experiment={col_response}")
+        self.logger.debug(f"Starting call | row={idx} | experiment={experiment_name}")
         for attempt in range(1, self.max_retries + 1):
             try:
                 # # TEST
@@ -330,7 +327,7 @@ class LLMExperimentRunner:
 
                 response_text, date = self.call_llm(system_prompt, experiment_prompt)
                 self.logger.info( # consider removing sysprompt and exp prompt logging
-                    f"SUCCESS | row={idx} | experiment={col_response} | sys_prompt={system_prompt} | experiment_prompt={experiment_prompt}| attempt={attempt}"
+                    f"SUCCESS | row={idx} | experiment={experiment_name} | sys_prompt={system_prompt} | experiment_prompt={experiment_prompt}| attempt={attempt}"
                     )
                 return idx, response_text, date 
 
@@ -352,11 +349,11 @@ class LLMExperimentRunner:
                     delay_time = self.base_delay * (2 ** (attempt - 1))
                     time.sleep(delay_time)
                     self.logger.warning(
-                        f"TIMEOUT | row={idx} | experiment={col_response} |attempt={attempt}/{self.max_retries} | retrying in {delay_time:.1f}s"
+                        f"TIMEOUT | row={idx} | experiment={experiment_name} |attempt={attempt}/{self.max_retries} | retrying in {delay_time:.1f}s"
                     )
 
                 else:
-                    self.logger.error(f"FAILED | row={idx} | experiment={col_response} | attempts={self.max_retries}")
+                    self.logger.error(f"FAILED | row={idx} | experiment={experiment_name} | attempts={self.max_retries}")
 
                     return idx, f"[ERROR: {str(e)}]", None
 
@@ -388,17 +385,16 @@ class LLMExperimentRunner:
             The DataFrame augmented with experiment responses and timestamps.
         """
         
-        for experiment_name, experiment in tqdm(instructions.items(), desc=f"Experiment:"):
+        for experiment_name, experiment in tqdm(instructions.items(), desc=f"Experiment"):
             checkpoint_save = (self.checkpoint_dir / f"{experiment_name}_{run_id}_{self.llm}_{persona}_{self.thinking}_checkpoint.csv")
             if self.use_checkpoint and checkpoint_save.exists():
                 df = pd.read_csv(checkpoint_save, index_col=0)
             df = df.copy()
             completed = 0
-            col_response = f"{experiment_name}_{self.llm}"
-            col_date = f"{col_response}_date"
+            col_date = f"{experiment_name}_date"
 
-            if col_response not in df.columns:
-                df[col_response] = None
+            if experiment_name not in df.columns:
+                df[experiment_name] = None
                 
             if col_date not in df.columns:
                 df[col_date] = None
@@ -407,9 +403,9 @@ class LLMExperimentRunner:
                 futures = [
                     executor.submit(
                         self._run_single_call,
-                        row.name, row, experiment_name, experiment, col_response
+                        row.name, row, experiment_name, experiment
                     )
-                    for _, row in df.iterrows() if pd.isna(row[col_response])
+                    for _, row in df.iterrows() if pd.isna(row[experiment_name])
                 ]
 
                 for future in tqdm(as_completed(futures), total=len(futures), leave=False):
@@ -422,7 +418,7 @@ class LLMExperimentRunner:
                     if response_text is None:
                         continue
 
-                    df.at[idx, col_response] = response_text
+                    df.at[idx, experiment_name] = response_text
                     df.at[idx, col_date] = date
                     completed += 1
                     if completed % self.save_every == 0:
