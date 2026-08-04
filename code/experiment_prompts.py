@@ -16,10 +16,9 @@ def get_gamblers_fallacy_experiments(
 
     SYSTEM_PROMPT = get_system_prompt(persona=persona)
     BASE_PROMPT = textwrap.dedent("""                                                       
-    The individual you are simulating is playing roulette and can either bet on black or red.
-    Pick the choice that is most consistent with the described individual's behavioral tendencies.
-    {history}What would the person choose? 
-    Your response should be a single word containing the individuals choice.
+    You are playing roulette and can either bet on red or black.
+    {history}What would you choose? 
+    Respond with only the choice in lower case. Do not provide an explanation or any additional characters.
     """).strip()
 
     experiments = {}
@@ -52,8 +51,11 @@ def get_loss_aversion_experiments(persona: Literal["description", "raw_persona",
     system_prompt = get_system_prompt(persona=persona)
 
     base_prompt = (
-        "You take part in a study evaluating peoples' choices among risky prospects. There is no 'correct' answer. "
-        "Respond with either A or B.\n"
+        """You take part in a study evaluating peoples' choices among risky prospects.
+Imagine that you are actually faced with the choice described below.
+There is no 'correct' answer.
+Respond with exactly one letter: A or B. Do not provide an explanation.
+-------------------------------------\n"""
     )
 
     prompts = {
@@ -108,7 +110,7 @@ It is then called to your attention that the insurance company offers a new prog
 For example, if an accident occurs on an odd day of the month, you pay the other half of the regular premium and your losses are covered; but if the accident occurs on an even day of the month, your insurance payment is refunded and your losses are not covered.
 Recall that the premium for full coverage is such that you find this insurance barely worth its cost.
 Under these circumstances, would you purchase probabilistic insurance:
-{format_by_group("Yes", "No", group)}"""
+{format_by_group("(Yes)", "(No)", group)}"""
         ),
 
         "Loss_Aversion_10": (
@@ -170,13 +172,13 @@ def get_serial_position_effect_experiments(persona: Literal["description", "raw_
     base_prompt = textwrap.dedent(
         """
         You are participating in a memory experiment.
-        You will be shown a list of words, one word per line.
-        Do not invent words.
-        The order does not matter.
-        Read the following list carefully. After reading it, recall as many words as you can remember.
-        Output only the remembered words separated by commas.
-        -----------------------------------------\n
-        """)
+        You will be shown a list of words, with one word per line.
+        Study the list carefully. After studying it, recall as many words from the list as you can remember.
+        The order of the words in your response does not matter.
+        Output only the words you remember, separated by commas.\n
+        -----------------------------------------
+        """
+    )
     prompts = {
         "Serial_Position_Effect_20": "{Serial_Position_Effect_20}",
         "Serial_Position_Effect_40": "{Serial_Position_Effect_40}",
@@ -193,20 +195,23 @@ def get_serial_position_effect_experiments(persona: Literal["description", "raw_
 def get_big_five_aspects_questionaire(persona: Literal["description", "raw_persona", "no_persona"]) -> Dict[str, Experiment]:
 
     system_prompt = get_system_prompt(persona=persona)
-    # adapted from https://psytests.org/big5/bfasen-run.html?utm_source=chatgpt.com
+    # adapted from https://psytests.org/big5/bfasen-run.html
     base_prompt = textwrap.dedent(
         """
         You will be provided with a phrase describing people's behaviors. 
         Describe yourself as you generally are now, not as you wish to be in the future.
-        Describe yourself as you honestly see yourself, in relation to other people you know of the same sex as you are, and roughly your same age.
-        Answer only with a single number from 1 to 5 that corresponds to how accurately the statement describes you.
+        Describe yourself as you honestly see yourself, in relation to other people you know of the same sex as you are.
+
+        Rate the following statement on a scale from 1 to 5, where:
         1 - Very Inaccurate
         2 - Moderately Inaccurate
         3 - Neither Accurate, Nor Inaccurate
         4 - Moderately Accurate
         5 - Very Accurate
 
-        Rate the following statement:
+        Your entire response must consist of exactly one digit: 1, 2, 3, 4, or 5.
+        -------------------------------------
+        Statement:
         """
     )
 
@@ -347,34 +352,38 @@ def get_big_five_aspects_questionaire(persona: Literal["description", "raw_perso
 
 if __name__ == "__main__":
     import pandas as pd
-    import json
 
     df = pd.read_csv("/home/daniel/Desktop/Master_Thesis/code/2_personas_test.csv")
 
-    test = get_serial_position_effect_experiments("description")
+    # test = get_serial_position_effect_experiments("description")
 
-    # test one simulated person
+    # # test one simulated person
     row = df.iloc[0]
 
-    for name, experiment in test.items():
+    # for name, experiment in test.items():
 
-        map_size = name.split("_")[-1]  # extracts 20, 40, or 80
+    #     map_size = name.split("_")[-1]  # extracts 20, 40, or 80
 
-        word_map = json.loads(
-            row[f"serial_position_effect_map_{map_size}"]
-        )
+    #     word_map = json.loads(
+    #         row[f"serial_position_effect_map_{map_size}"]
+    #     )
 
-        formatted_prompt = experiment.prompt.format(
-            **{
-                f"Serial_Position_Effect_{map_size}":
-                "\n".join(word_map.keys())
-            }
-        )
+    #     formatted_prompt = experiment.prompt.format(
+    #         **{
+    #             f"Serial_Position_Effect_{map_size}":
+    #             "\n".join(word_map.keys())
+    #         }
+    #     )
 
-        print(name)
-        print("-" * 50)
-        print(formatted_prompt)
-        print()
-        print("Position map:")
-        print(word_map)
-        print("=" * 80)
+    #     print(name)
+    #     print("-" * 50)
+    #     print(formatted_prompt)
+    #     print()
+    #     print("Position map:")
+    #     print(word_map)
+    #     print("=" * 80)
+    loss_aversion_experiments = get_loss_aversion_experiments(
+        persona="description",
+        group=1)
+    print(loss_aversion_experiments["Loss_Aversion_1"].sys_instruction.format(description=row["llm_persona"], raw_persona=row["raw_persona"]))
+    print(loss_aversion_experiments["Loss_Aversion_1"].prompt)

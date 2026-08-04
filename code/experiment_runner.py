@@ -174,9 +174,13 @@ class LLMExperimentRunner:
         response = self.client.chat.completions.create(**kwargs)
 
         date = datetime.fromtimestamp(response.created, tz=self.tz)
+        if self.thinking == "enabled":
+            response_reasoning = response.choices[0].message.reasoning_content
+        else:
+            response_reasoning = None
         response_text = response.choices[0].message.content
 
-        return response_text, date
+        return response_text, response_reasoning, date
 
     def _generate_single_persona(self, idx, row, persona_system_prompt):
         """
@@ -197,22 +201,22 @@ class LLMExperimentRunner:
             (row index, persona text or error message, generation datetime)
         """
         if pd.notna(row["llm_persona"]):
-            return idx, None, None
+            return idx, None, None, None
 
         message = row["raw_persona"]
         for attempt in range(1, self.max_retries + 1):
             try:
-                response_text, date = self.call_llm(persona_system_prompt, message)
-                return idx, response_text, date
+                response_text, response_reasoning, date = self.call_llm(persona_system_prompt, message)
+                return idx, response_text, response_reasoning, date
 
             except Exception as e:
                 msg = str(e).lower()
                 if "timeout" in msg or "timed out" in msg:
                     if attempt == self.max_retries:
-                        return idx, f"[ERROR: timeout after {self.max_retries} retries]", None
+                        return idx, f"[ERROR: timeout after {self.max_retries} retries]", None, None
                     time.sleep(self.base_delay * (2 ** (attempt - 1)))
                 else:
-                    return idx, f"[ERROR: {str(e)}]", None
+                    return idx, f"[ERROR: {str(e)}]", None, None
 
     def generate_personas(self, df: pd.DataFrame, persona_system_prompt: str):
         """
@@ -238,7 +242,10 @@ class LLMExperimentRunner:
         """
         if "llm_persona" not in df.columns:
             df["llm_persona"] = None
-            
+
+        if "llm_persona_reasoning" not in df.columns:
+            df["llm_persona_reasoning"] = None
+
         if "persona_generation_date" not in df.columns:
             df["persona_generation_date"] = None
 
@@ -256,12 +263,13 @@ class LLMExperimentRunner:
             for i, future in enumerate(
                 tqdm(as_completed(futures), total=len(futures), desc="Generating personas")
             ):
-                idx, response_text, date = future.result()
+                idx, response_text, response_reasoning, date = future.result()
 
                 if response_text is None:
                     continue
 
                 df.at[idx, "llm_persona"] = response_text
+                df.at[idx, "llm_persona_reasoning"] = response_reasoning
                 df.at[idx, "persona_generation_date"] = date
 
         df.to_csv(self.data_dir / "Personas.csv", index=False)
@@ -294,11 +302,10 @@ class LLMExperimentRunner:
         """
         # skip if already filled
         if pd.notna(row[experiment_name]):
-            return idx, None, None
+            return idx, None, None, None
         system_prompt = experiment.sys_instruction.format(
             description=row["llm_persona"],
-            raw_persona=row["raw_persona"],
-            no_persona=f"Age: {row['Age']}\nGender: {row['Gender']}"
+            raw_persona=row["raw_persona"]
         )
         if experiment_name.startswith("Serial_Position_Effect"):
             map_size = experiment_name.split("_")[-1]
@@ -325,11 +332,11 @@ class LLMExperimentRunner:
                 # print("=" * 80)
                 # return idx, "[TEST]", None
 
-                response_text, date = self.call_llm(system_prompt, experiment_prompt)
+                response_text, response_reasoning, date = self.call_llm(system_prompt, experiment_prompt)
                 self.logger.info( # consider removing sysprompt and exp prompt logging
                     f"SUCCESS | row={idx} | experiment={experiment_name} | sys_prompt={system_prompt} | experiment_prompt={experiment_prompt}| attempt={attempt}"
                     )
-                return idx, response_text, date 
+                return idx, response_text, response_reasoning, date 
 
             except Exception as e:
                 msg = str(e).lower()
@@ -345,7 +352,7 @@ class LLMExperimentRunner:
                 ]
                 if any(err in msg for err in retryable_errors):
                     if attempt == self.max_retries:
-                        return idx, f"[ERROR: failed after {self.max_retries} retries: {str(e)}]", None
+                        return idx, f"[ERROR: failed after {self.max_retries} retries: {str(e)}]", None, None
                     delay_time = self.base_delay * (2 ** (attempt - 1))
                     time.sleep(delay_time)
                     self.logger.warning(
@@ -355,7 +362,7 @@ class LLMExperimentRunner:
                 else:
                     self.logger.error(f"FAILED | row={idx} | experiment={experiment_name} | attempts={self.max_retries}")
 
-                    return idx, f"[ERROR: {str(e)}]", None
+                    return idx, f"[ERROR: {str(e)}]", None, None
 
 
     def run_experiment(
@@ -376,53 +383,69 @@ class LLMExperimentRunner:
             Dictionary mapping experiment names to `Experiment` objects.
         persona : str
             What persona condition should be used from [description, raw_persona, no_persona].
-        save_name : str
-            Base filename for the final CSV output.
+        run_id : str
+            Identifier for the current experiment run.
 
         Returns
         -------
         pd.DataFrame
             The DataFrame augmented with experiment responses and timestamps.
         """
-        
-        for experiment_name, experiment in tqdm(instructions.items(), desc=f"Experiment"):
-            checkpoint_save = (self.checkpoint_dir / f"{experiment_name}_{run_id}_{self.llm}_{persona}_{self.thinking}_checkpoint.csv")
-            if self.use_checkpoint and checkpoint_save.exists():
-                df = pd.read_csv(checkpoint_save, index_col=0)
-            df = df.copy()
-            completed = 0
-            col_date = f"{experiment_name}_date"
-
+        df = df.copy()
+        for experiment_name in instructions:
             if experiment_name not in df.columns:
                 df[experiment_name] = None
-                
-            if col_date not in df.columns:
-                df[col_date] = None
 
-            with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-                futures = [
-                    executor.submit(
-                        self._run_single_call,
-                        row.name, row, experiment_name, experiment
-                    )
-                    for _, row in df.iterrows() if pd.isna(row[experiment_name])
-                ]
-
-                for future in tqdm(as_completed(futures), total=len(futures), leave=False):
-                    try:
-                        idx, response_text, date = future.result()
-                    except Exception as e:
-                        self.logger.error(f"Unexpected error in future: {e}")
-                        continue
+        total_calls = sum(
+            df[experiment_name].isna().sum()
+            for experiment_name in instructions
+        )
+        with tqdm(total=total_calls, desc=f"Experiment") as pbar:
+            for experiment_name, experiment in instructions.items():
+                checkpoint_save = (self.checkpoint_dir / f"{experiment_name}_{run_id}_{self.llm}_{persona}_{self.thinking}_checkpoint.csv")
+                if self.use_checkpoint and checkpoint_save.exists():
+                    df = pd.read_csv(checkpoint_save, index_col=0)
+                    for col in instructions:
+                        if col in df.columns:
+                            df[col] = df[col].astype("string")
+                    df = df.copy()
+                completed = 0
+                col_date = f"{experiment_name}_date"
+                reasoning = f"{experiment_name}_reasoning"
                     
-                    if response_text is None:
-                        continue
+                if col_date not in df.columns:
+                    df[col_date] = None
 
-                    df.at[idx, experiment_name] = response_text
-                    df.at[idx, col_date] = date
-                    completed += 1
-                    if completed % self.save_every == 0:
-                        df.to_csv(checkpoint_save, index=True)
+                if reasoning not in df.columns:
+                    df[reasoning] = None
 
-            df.to_csv(checkpoint_save, index=True)
-        return df
+
+                with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+                    futures = [
+                        executor.submit(
+                            self._run_single_call,
+                            row.name, row, experiment_name, experiment
+                        )
+                        for _, row in df.iterrows() if pd.isna(row[experiment_name])
+                    ]
+
+                    for future in as_completed(futures):
+                        try:
+                            idx, response_text, response_reasoning, date = future.result()
+                        except Exception as e:
+                            self.logger.error(f"Unexpected error in future: {e}")
+                            continue
+                        
+                        if response_text is None:
+                            continue
+
+                        df.at[idx, experiment_name] = response_text
+                        df.at[idx, reasoning] = response_reasoning
+                        df.at[idx, col_date] = date
+                        completed += 1
+                        if completed % self.save_every == 0:
+                            df.to_csv(checkpoint_save, index=True)
+                        pbar.update(1)
+
+                df.to_csv(checkpoint_save, index=True)
+            return df
