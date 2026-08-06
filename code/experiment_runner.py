@@ -218,7 +218,7 @@ class LLMExperimentRunner:
                 else:
                     return idx, f"[ERROR: {str(e)}]", None, None
 
-    def generate_personas(self, df: pd.DataFrame, persona_system_prompt: str):
+    def generate_personas(self, df: pd.DataFrame, persona_system_prompt: str, save_name: str):
         """
         Generate personas for all rows in a DataFrame.
 
@@ -272,7 +272,7 @@ class LLMExperimentRunner:
                 df.at[idx, "llm_persona_reasoning"] = response_reasoning
                 df.at[idx, "persona_generation_date"] = date
 
-        df.to_csv(self.data_dir / "Personas.csv", index=False)
+        df.to_csv(self.data_dir / f"{save_name}_Personas.csv", index=False)
         return df
 
             
@@ -324,14 +324,6 @@ class LLMExperimentRunner:
         self.logger.debug(f"Starting call | row={idx} | experiment={experiment_name}")
         for attempt in range(1, self.max_retries + 1):
             try:
-                # # TEST
-                # print("=" * 80)
-                # print(system_prompt)
-                # print("-" * 80)
-                # print(experiment_prompt)
-                # print("=" * 80)
-                # return idx, "[TEST]", None
-
                 response_text, response_reasoning, date = self.call_llm(system_prompt, experiment_prompt)
                 self.logger.info( # consider removing sysprompt and exp prompt logging
                     f"SUCCESS | row={idx} | experiment={experiment_name} | sys_prompt={system_prompt} | experiment_prompt={experiment_prompt}| attempt={attempt}"

@@ -4,7 +4,7 @@ from typing import Literal
 def get_system_prompt(persona: Literal["description", "raw_persona", "no_persona"]) -> str:
     if persona == "description":
         persona_information = textwrap.dedent("""
-        Personality description::
+        Personality description:
         ------------------------------------------------------------
         {description}
         ------------------------------------------------------------
