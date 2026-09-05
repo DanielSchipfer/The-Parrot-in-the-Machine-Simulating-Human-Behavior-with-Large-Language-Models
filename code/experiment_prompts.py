@@ -129,7 +129,7 @@ You are now asked to choose between
 f"""In addition to whatever you own, you have been given 2,000.
 You are now asked to choose between
 {format_by_group("(1,000 with probability .50)", "(500 with certainty)", group)}"""
-        ),
+        ), # THIS IS WRONG there is a - missing
 
         "Loss_Aversion_13": format_by_group(
             "(6,000 with probability .25)",
@@ -353,13 +353,13 @@ def get_big_five_aspects_questionaire(persona: Literal["description", "raw_perso
 if __name__ == "__main__":
     import pandas as pd
 
-    df = pd.read_csv("/home/daniel/Desktop/Master_Thesis/code/2_personas_test.csv")
+    df = pd.read_csv("/home/daniel/Desktop/Master_Thesis/code/generated_data/gamblers_fallacy_results.csv")
 
     # test = get_serial_position_effect_experiments("description")
 
     # # test one simulated person
     row = df.iloc[0]
-
+    # print(row)
     # for name, experiment in test.items():
 
     #     map_size = name.split("_")[-1]  # extracts 20, 40, or 80
@@ -382,8 +382,15 @@ if __name__ == "__main__":
     #     print("Position map:")
     #     print(word_map)
     #     print("=" * 80)
-    loss_aversion_experiments = get_loss_aversion_experiments(
-        persona="description",
-        group=1)
-    print(loss_aversion_experiments["Loss_Aversion_1"].sys_instruction.format(description=row["llm_persona"], raw_persona=row["raw_persona"]))
-    print(loss_aversion_experiments["Loss_Aversion_1"].prompt)
+
+    # gamblers_exp = get_gamblers_fallacy_experiments(10, "description", 1)
+    # print(gamblers_exp["Gamblers_Fallacy_0"].sys_instruction.format(description=row["llm_persona"]))
+    # print(gamblers_exp["Gamblers_Fallacy_10"].prompt)
+    # print("------------------------")
+    # print(gamblers_exp["Gamblers_Fallacy_0"].prompt)
+    loss_aversion = get_big_five_aspects_questionaire("raw_persona")
+    # print(loss_aversion["Loss_Aversion_1"].sys_instruction.format(raw_persona=row["raw_persona"]))
+    print(loss_aversion["Assertiveness_1"].prompt)
+
+
+
